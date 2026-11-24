@@ -1,0 +1,11 @@
+# Dependencias y compilaciones
+node_modules/
+dist/
+src-tauri/target/
+
+# Archivos de entorno y locales
+.env
+.env.local
+*.log
+.DS_Store
+Thumbs.db
