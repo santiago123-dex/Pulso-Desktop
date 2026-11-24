@@ -3,6 +3,7 @@ pub mod mcp;
 pub mod providers;
 pub mod security;
 pub mod storage;
+pub mod updates;
 pub mod workspace_tools;
 
 use std::path::PathBuf;
@@ -251,6 +252,22 @@ async fn get_antigravity_quota() -> Vec<providers::QuotaGroup> {
     providers::fetch_antigravity_quota().await
 }
 
+#[tauri::command]
+async fn check_desktop_update() -> Result<Option<updates::DesktopUpdateInfo>, String> {
+    updates::check_for_desktop_update().await
+}
+
+#[tauri::command]
+async fn install_desktop_update(
+    app: tauri::AppHandle,
+    download_url: String,
+    asset_name: String,
+) -> Result<(), String> {
+    updates::download_and_launch_installer(download_url, asset_name).await?;
+    app.exit(0);
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -297,6 +314,8 @@ pub fn run() {
             inspect_project_skills,
             open_in_pulso_editor,
             get_antigravity_quota,
+            check_desktop_update,
+            install_desktop_update,
         ])
         .run(tauri::generate_context!())
         .expect("Error al iniciar Pulso Desktop");

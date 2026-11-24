@@ -169,3 +169,25 @@ export async function fetchAntigravityQuota(): Promise<QuotaGroup[]> {
     return [];
   }
 }
+
+export interface DesktopUpdateInfo {
+  version: string;
+  current: string;
+  notes: string;
+  releaseUrl: string;
+  downloadUrl: string;
+  assetName: string;
+}
+
+export async function checkDesktopUpdate(): Promise<DesktopUpdateInfo | null> {
+  if (!isTauriRuntime()) return null;
+  return invoke<DesktopUpdateInfo | null>("check_desktop_update");
+}
+
+export async function installDesktopUpdate(info: DesktopUpdateInfo): Promise<void> {
+  if (!isTauriRuntime()) return;
+  await invoke("install_desktop_update", {
+    downloadUrl: info.downloadUrl,
+    assetName: info.assetName,
+  });
+}

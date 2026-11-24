@@ -22,13 +22,16 @@ import {
 } from "./chat";
 import { getLocale, setLocale, t, type Locale } from "./locales/i18n";
 import {
+  checkDesktopUpdate,
   defaultSettings,
   deleteProviderApiKey,
   describeProviderConnection,
   fallbackProviders,
   fetchAntigravityQuota,
   fetchDetectedProviders,
+  installDesktopUpdate,
   saveProviderApiKey,
+  type DesktopUpdateInfo,
   type McpServerItem,
   type ProviderStatus,
   type QuotaGroup,
@@ -91,6 +94,11 @@ let settingsOpen = false;
 let skillsModalOpen = false;
 let automationsModalOpen = false;
 let openTopMenu: "workspace" | "view" | "window" | null = null;
+let availableUpdate: DesktopUpdateInfo | null = null;
+let updateModalOpen = false;
+let checkingUpdate = false;
+let installingUpdate = false;
+let updateStatusMsg = "";
 let refreshingProviders = false;
 let loadingQuota = false;
 let quotaGroups: QuotaGroup[] = [];
@@ -414,6 +422,96 @@ function renderSettingsModal(locale: Locale): string {
                     )
                     .join("")
             }
+          </div>
+          <div class="provider-card">
+            <div class="provider-card-head">
+              <div>
+                <div class="provider-card-title">
+                  <span>${locale === "en" ? "Updates" : "Actualizaciones"}</span>
+                </div>
+                <div class="provider-card-sub">
+                  ${escapeHtml(
+                    updateStatusMsg ||
+                      (availableUpdate
+                        ? locale === "en"
+                          ? `Version v${availableUpdate.version} available`
+                          : `Versión v${availableUpdate.version} disponible`
+                        : locale === "en"
+                          ? "Installed version: v0.3.0"
+                          : "Versión instalada: v0.3.0")
+                  )}
+                </div>
+              </div>
+              <button id="check-update-btn" type="button" class="pill-btn">
+                ${icons.refresh}
+                <span>${
+                  checkingUpdate
+                    ? locale === "en"
+                      ? "Checking..."
+                      : "Buscando..."
+                    : locale === "en"
+                      ? "Check updates"
+                      : "Buscar actualizaciones"
+                }</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderUpdateModal(locale: Locale): string {
+  if (!updateModalOpen || !availableUpdate) return "";
+  return `
+    <div id="update-backdrop" class="modal-backdrop">
+      <div class="modal-card" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <span>${
+            locale === "en"
+              ? `Update available (v${availableUpdate.version})`
+              : `Actualización disponible (v${availableUpdate.version})`
+          }</span>
+          <button id="close-update-btn" type="button" class="icon-btn">${icons.close}</button>
+        </div>
+        <div class="modal-body">
+          <div class="provider-card-sub">
+            ${
+              locale === "en"
+                ? `You have v${availableUpdate.current} installed and v${availableUpdate.version} is ready. Pulso Desktop will download the installer and update automatically.`
+                : `Tienes instalada la v${availableUpdate.current} y está disponible la v${availableUpdate.version}. Pulso Desktop descargará el instalador y se actualizará automáticamente.`
+            }
+          </div>
+          ${
+            availableUpdate.notes
+              ? `<div class="artifact-card">
+                  <div class="artifact-card-title">${locale === "en" ? "Release notes" : "Novedades"}</div>
+                  <pre style="white-space:pre-wrap;">${escapeHtml(availableUpdate.notes)}</pre>
+                </div>`
+              : ""
+          }
+          ${updateStatusMsg ? `<div class="msg-error">${escapeHtml(updateStatusMsg)}</div>` : ""}
+          <div style="display:flex;justify-content:flex-end;gap:8px;">
+            <button id="cancel-update-btn" type="button" class="pill-btn">
+              ${locale === "en" ? "Later" : "Más tarde"}
+            </button>
+            <button
+              id="confirm-install-update-btn"
+              type="button"
+              class="pill-btn pill-update"
+              ${installingUpdate ? "disabled" : ""}
+            >
+              ${
+                installingUpdate
+                  ? locale === "en"
+                    ? "Downloading..."
+                    : "Descargando..."
+                  : locale === "en"
+                    ? "Download & Install"
+                    : "Descargar e instalar"
+              }
+            </button>
           </div>
         </div>
       </div>
@@ -814,6 +912,17 @@ function render(): void {
 
             <div class="topbar-right">
               ${
+                availableUpdate
+                  ? `<button id="topbar-update-btn" class="pill-btn pill-update" type="button">
+                      ${
+                        locale === "en"
+                          ? `Update to v${availableUpdate.version} &rarr;`
+                          : `Actualizar a v${availableUpdate.version} &rarr;`
+                      }
+                    </button>`
+                  : ""
+              }
+              ${
                 activeProject.path
                   ? activeProject.trusted
                     ? `<span class="pill-btn pill-ok">${icons.shield} ${t("sidebar.trusted")}</span>`
@@ -1093,6 +1202,7 @@ function render(): void {
       ${renderSettingsModal(locale)}
       ${renderSkillsModal(locale)}
       ${renderAutomationsModal(locale)}
+      ${renderUpdateModal(locale)}
       ${renderLightbox()}
     </div>
   `;
@@ -1595,6 +1705,68 @@ function bindEvents(): void {
     render();
   });
 
+  document.getElementById("check-update-btn")?.addEventListener("click", async () => {
+    checkingUpdate = true;
+    updateStatusMsg = "";
+    render();
+    try {
+      const found = await checkDesktopUpdate();
+      availableUpdate = found;
+      if (found) {
+        updateStatusMsg = "";
+        settingsOpen = false;
+        updateModalOpen = true;
+      } else {
+        updateStatusMsg =
+          getLocale() === "en"
+            ? "Pulso Desktop is up to date."
+            : "Pulso Desktop está actualizado.";
+      }
+    } catch (err) {
+      updateStatusMsg = typeof err === "string" ? err : String(err);
+    } finally {
+      checkingUpdate = false;
+      render();
+    }
+  });
+
+  document.getElementById("topbar-update-btn")?.addEventListener("click", () => {
+    updateStatusMsg = "";
+    updateModalOpen = true;
+    render();
+  });
+
+  document.getElementById("close-update-btn")?.addEventListener("click", () => {
+    updateModalOpen = false;
+    render();
+  });
+
+  document.getElementById("cancel-update-btn")?.addEventListener("click", () => {
+    updateModalOpen = false;
+    render();
+  });
+
+  document.getElementById("update-backdrop")?.addEventListener("click", (ev) => {
+    if (ev.target === ev.currentTarget && !installingUpdate) {
+      updateModalOpen = false;
+      render();
+    }
+  });
+
+  document.getElementById("confirm-install-update-btn")?.addEventListener("click", async () => {
+    if (!availableUpdate || installingUpdate) return;
+    installingUpdate = true;
+    updateStatusMsg = "";
+    render();
+    try {
+      await installDesktopUpdate(availableUpdate);
+    } catch (err) {
+      updateStatusMsg = typeof err === "string" ? err : String(err);
+      installingUpdate = false;
+      render();
+    }
+  });
+
   document.getElementById("open-skills-btn")?.addEventListener("click", async () => {
     skillsModalOpen = true;
     render();
@@ -2075,6 +2247,19 @@ async function bootstrap(): Promise<void> {
   if (restoredAnyImage) render();
 
   await refreshProviders(!saved?.providerId);
+
+  // Comprobación silenciosa de nuevas versiones en segundo plano
+  window.setTimeout(async () => {
+    try {
+      const found = await checkDesktopUpdate();
+      if (found) {
+        availableUpdate = found;
+        render();
+      }
+    } catch {
+      // Silencioso en segundo plano si no hay internet
+    }
+  }, 4000);
 }
 
 document.addEventListener("click", () => {
