@@ -36,7 +36,7 @@ import {
   type McpServerItem,
   type ProviderStatus,
 } from "./settings";
-import { PERIODIC_MS, STALE_MS, createUsageTracker, renderUsageBody } from "./settings/usage";
+import { IDLE_MS, RETURN_MS, RUNNING_MS, TICK_MS, createUsageTracker, renderUsageBody } from "./settings/usage";
 import {
   getWorkspaceStatus,
   inspectProjectSkills,
@@ -317,7 +317,7 @@ function syncUsageCard(): void {
 function openSettings(): void {
   settingsOpen = true;
   render();
-  refreshPlanUsage(STALE_MS);
+  refreshPlanUsage(RETURN_MS);
 }
 
 function renderSettingsModal(locale: Locale): string {
@@ -1340,7 +1340,7 @@ async function refreshProviders(autoSelectIfUnset: boolean): Promise<void> {
   const detected = await fetchDetectedProviders();
   providers = detected;
   refreshingProviders = false;
-  refreshPlanUsage(STALE_MS);
+  refreshPlanUsage(RETURN_MS);
 
   const currentProv = providers.find((p) => p.id === providerId);
   if (autoSelectIfUnset && (!currentProv || !currentProv.connected)) {
@@ -1892,7 +1892,7 @@ function bindEvents(): void {
         skillsReport = await inspectProjectSkills();
       } else if (act === "open-settings") {
         settingsOpen = true;
-        refreshPlanUsage(STALE_MS);
+        refreshPlanUsage(RETURN_MS);
       } else if (act === "toggle-sidebar") {
         sidebarOpen = !sidebarOpen;
       } else if (act === "toggle-artifacts") {
@@ -2294,12 +2294,12 @@ function refreshUsageIfVisible(minAgeMs: number): void {
   if (document.visibilityState === "visible") refreshPlanUsage(minAgeMs);
 }
 
-window.addEventListener("focus", () => refreshUsageIfVisible(STALE_MS));
-document.addEventListener("visibilitychange", () => refreshUsageIfVisible(STALE_MS));
-// Cada minuto repinta la antigüedad y consulta lo que ya tenga más de cinco minutos.
+window.addEventListener("focus", () => refreshUsageIfVisible(RETURN_MS));
+document.addEventListener("visibilitychange", () => refreshUsageIfVisible(RETURN_MS));
+// Repinta la antigüedad y consulta antes mientras hay una respuesta en curso.
 window.setInterval(() => {
   syncUsageCard();
-  refreshUsageIfVisible(PERIODIC_MS);
-}, 60_000);
+  refreshUsageIfVisible(activeRunId ? RUNNING_MS : IDLE_MS);
+}, TICK_MS);
 
 void bootstrap();

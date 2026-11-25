@@ -4,10 +4,14 @@ import { escapeHtml } from "../chat";
 import type { Locale } from "../locales/i18n";
 import type { QuotaGroup } from "./index";
 
-/** Cada cuánto se vuelve a consultar con la ventana a la vista. */
-export const PERIODIC_MS = 5 * 60_000;
+/** Cada cuánto se revisa si toca consultar y se repinta la antigüedad. */
+export const TICK_MS = 15_000;
+/** Antigüedad máxima de las cifras mientras hay una respuesta en curso. */
+export const RUNNING_MS = 45_000;
+/** Antigüedad máxima en reposo, para recoger el uso gastado fuera de Pulso. */
+export const IDLE_MS = 120_000;
 /** Al volver a la ventana o abrir los ajustes, no se repite una consulta más reciente que esto. */
-export const STALE_MS = 60_000;
+export const RETURN_MS = 20_000;
 
 export interface ProviderUsage {
   groups: QuotaGroup[];
