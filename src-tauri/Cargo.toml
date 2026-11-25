@@ -1,6 +1,6 @@
 [package]
 name = "pulso-desktop"
-version = "0.3.1"
+version = "0.3.2"
 description = "Aplicación de escritorio enfocada en agentes de IA, proyectos locales, artefactos y MCP"
 authors = ["Pulso"]
 edition = "2021"

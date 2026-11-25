@@ -1,5 +1,13 @@
 # Changelog — Pulso Desktop
 
+## [0.3.2] - 2026-11-25
+
+### Añadido
+- **El uso de los planes se actualiza solo.** La tarjeta de los ajustes muestra Claude, Codex y Antigravity (antes solo Antigravity, y a mano). Se consulta al abrir la aplicación, durante una respuesta (cada 45 segundos) y al terminarla, cada 2 minutos en reposo y al volver a la ventana. Con la ventana oculta o minimizada no hay consultas periódicas.
+
+### Corregido
+- Los ajustes mostraban «Versión instalada: v0.3.0» en cualquier versión.
+
 ## [0.3.1] - 2026-11-25
 
 ### Seguridad
