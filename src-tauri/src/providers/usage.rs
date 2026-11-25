@@ -165,7 +165,11 @@ fn codex_usage() -> Result<Vec<QuotaGroup>, String> {
         }
     });
 
-    let init = r#"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"pulso-desktop","version":"0.3.1"},"capabilities":{"experimentalApi":true}}}"#;
+    let init = concat!(
+        r#"{"id":1,"method":"initialize","params":{"clientInfo":{"name":"pulso-desktop","version":""#,
+        env!("CARGO_PKG_VERSION"),
+        r#""},"capabilities":{"experimentalApi":true}}}"#
+    );
     let mut groups = Vec::new();
     if writeln!(stdin, "{init}").is_ok() {
         let deadline = Instant::now() + Duration::from_secs(12);
