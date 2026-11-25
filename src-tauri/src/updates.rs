@@ -1,14 +1,10 @@
-use std::path::PathBuf;
-use std::time::Duration;
-
+//! Actualizaciones automáticas: lee `latest.json` de las releases de GitHub de este repositorio (ver `plugins.updater` en
+//! tauri.conf.json), **comprueba la firma** del instalador con la clave pública que lleva la aplicación y, si la persona acepta, lo
+//! instala y reinicia. Un instalador sin firma válida se rechaza antes de ejecutarlo. Solo en la versión instalada: las compilaciones
+//! de desarrollo no se actualizan. Ver docs/DISTRIBUCION.md.
 use serde::Serialize;
-
-use crate::providers::background_command;
-
-const RELEASES_API: &str =
-    "https://api.github.com/repos/santiago123-dex/Pulso-Editor-releases/releases?per_page=15";
-const ALLOWED_DOWNLOAD_PREFIX: &str =
-    "https://github.com/santiago123-dex/Pulso-Editor-releases/releases/download/";
+use tauri::{AppHandle, Manager};
+use tauri_plugin_updater::UpdaterExt;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -16,208 +12,74 @@ pub struct DesktopUpdateInfo {
     pub version: String,
     pub current: String,
     pub notes: String,
-    pub release_url: String,
-    pub download_url: String,
-    pub asset_name: String,
 }
 
-pub fn parse_semver(raw: &str) -> Option<(u64, u64, u64)> {
-    let cleaned = raw
-        .trim()
-        .trim_start_matches("desktop-")
-        .trim_start_matches('v')
-        .trim_start_matches('V');
-    let core = cleaned.split('-').next().unwrap_or(cleaned);
-    let mut parts = core.split('.');
-    let major = parts.next()?.parse::<u64>().ok()?;
-    let minor = parts.next()?.parse::<u64>().ok()?;
-    let patch = parts.next().unwrap_or("0").parse::<u64>().ok()?;
-    Some((major, minor, patch))
-}
+/// Cuántos caracteres de las notas de la versión se enseñan en el aviso.
+const MAX_NOTES: usize = 1200;
 
-pub fn is_newer_version(candidate: &str, current: &str) -> bool {
-    match (parse_semver(candidate), parse_semver(current)) {
-        (Some(cand), Some(curr)) => cand > curr,
-        _ => false,
+fn ensure_installed() -> Result<(), String> {
+    if cfg!(debug_assertions) {
+        return Err("Las actualizaciones solo funcionan en la versión instalada de Pulso Desktop.".into());
     }
+    Ok(())
 }
 
-fn is_desktop_installer(name: &str) -> bool {
-    let low = name.to_ascii_lowercase();
-    (low.contains("pulso.desktop") || low.contains("pulso desktop") || low.contains("pulso-desktop"))
-        && low.ends_with(".exe")
+fn clip_notes(notes: Option<&str>) -> String {
+    notes.unwrap_or("").trim().chars().take(MAX_NOTES).collect()
 }
 
-pub async fn check_for_desktop_update() -> Result<Option<DesktopUpdateInfo>, String> {
-    let current = env!("CARGO_PKG_VERSION").to_string();
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(12))
-        .user_agent(format!("Pulso-Desktop/{current}"))
-        .build()
-        .map_err(|e| e.to_string())?;
+async fn find(app: &AppHandle) -> Result<Option<tauri_plugin_updater::Update>, String> {
+    let updater = app.updater().map_err(|e| format!("No se pudo preparar el actualizador: {e}"))?;
+    updater.check().await.map_err(|e| format!("No se pudo comprobar si hay una versión nueva: {e}"))
+}
 
-    let resp = client
-        .get(RELEASES_API)
-        .header("Accept", "application/vnd.github+json")
-        .send()
+pub async fn check(app: &AppHandle) -> Result<Option<DesktopUpdateInfo>, String> {
+    ensure_installed()?;
+    Ok(find(app).await?.map(|u| DesktopUpdateInfo {
+        version: u.version.clone(),
+        current: u.current_version.clone(),
+        notes: clip_notes(u.body.as_deref()),
+    }))
+}
+
+/// Descarga, **verifica la firma**, instala y reinicia. En Windows el instalador cierra la aplicación por su cuenta, así que antes se
+/// detienen las respuestas de IA en marcha (sus procesos quedarían sueltos).
+pub async fn install(app: &AppHandle) -> Result<(), String> {
+    ensure_installed()?;
+    let update = find(app).await?.ok_or_else(|| "Ya no hay ninguna versión nueva pendiente.".to_string())?;
+    // `download` comprueba la firma: si no es válida, falla aquí y no se instala nada.
+    let bytes = update
+        .download(|_, _| {}, || {})
         .await
-        .map_err(|e| format!("No se pudo consultar actualizaciones en GitHub: {e}"))?;
-
-    if !resp.status().is_success() {
-        return Err(format!(
-            "GitHub respondió {} al buscar actualizaciones.",
-            resp.status()
-        ));
-    }
-
-    let releases: Vec<serde_json::Value> = resp.json().await.map_err(|e| e.to_string())?;
-    let mut best: Option<((u64, u64, u64), DesktopUpdateInfo)> = None;
-
-    for rel in releases {
-        if rel.get("draft").and_then(|x| x.as_bool()) == Some(true) {
-            continue;
-        }
-        let tag = rel
-            .get("tag_name")
-            .and_then(|x| x.as_str())
-            .unwrap_or("");
-        let Some(ver_tuple) = parse_semver(tag) else {
-            continue;
-        };
-        if !is_newer_version(tag, &current) {
-            continue;
-        }
-
-        let Some(assets) = rel.get("assets").and_then(|a| a.as_array()) else {
-            continue;
-        };
-        let desktop_asset = assets.iter().find(|a| {
-            a.get("name")
-                .and_then(|n| n.as_str())
-                .is_some_and(is_desktop_installer)
-        });
-        let Some(asset) = desktop_asset else {
-            continue;
-        };
-
-        let asset_name = asset
-            .get("name")
-            .and_then(|x| x.as_str())
-            .unwrap_or("Pulso.Desktop-setup.exe")
-            .to_string();
-        let download_url = asset
-            .get("browser_download_url")
-            .and_then(|x| x.as_str())
-            .unwrap_or("")
-            .to_string();
-        if !download_url.starts_with(ALLOWED_DOWNLOAD_PREFIX) {
-            continue;
-        }
-
-        let release_url = rel
-            .get("html_url")
-            .and_then(|x| x.as_str())
-            .unwrap_or("https://github.com/santiago123-dex/Pulso-Editor-releases/releases")
-            .to_string();
-        let notes = rel
-            .get("body")
-            .and_then(|x| x.as_str())
-            .unwrap_or("")
-            .trim()
-            .chars()
-            .take(1200)
-            .collect();
-
-        let clean_ver = format!("{}.{}.{}", ver_tuple.0, ver_tuple.1, ver_tuple.2);
-        let info = DesktopUpdateInfo {
-            version: clean_ver,
-            current: current.clone(),
-            notes,
-            release_url,
-            download_url,
-            asset_name,
-        };
-
-        if best.as_ref().is_none_or(|(b_ver, _)| ver_tuple > *b_ver) {
-            best = Some((ver_tuple, info));
-        }
-    }
-
-    Ok(best.map(|(_, info)| info))
-}
-
-pub async fn download_and_launch_installer(
-    download_url: String,
-    asset_name: String,
-) -> Result<String, String> {
-    if !download_url.starts_with(ALLOWED_DOWNLOAD_PREFIX) {
-        return Err("URL de descarga no permitida.".to_string());
-    }
-
-    let safe_name: String = asset_name
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
-        .collect();
-    let file_name = if safe_name.to_ascii_lowercase().ends_with(".exe") {
-        safe_name
-    } else {
-        "Pulso.Desktop-update-setup.exe".to_string()
-    };
-
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(180))
-        .user_agent(format!("Pulso-Desktop/{}", env!("CARGO_PKG_VERSION")))
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let resp = client
-        .get(&download_url)
-        .send()
-        .await
-        .map_err(|e| format!("No se pudo descargar el instalador: {e}"))?;
-
-    if !resp.status().is_success() {
-        return Err(format!(
-            "Error al descargar el instalador (HTTP {}).",
-            resp.status()
-        ));
-    }
-
-    let bytes = resp
-        .bytes()
-        .await
-        .map_err(|e| format!("Error leyendo la descarga: {e}"))?;
-    if bytes.is_empty() {
-        return Err("El archivo descargado está vacío.".to_string());
-    }
-
-    let dest: PathBuf = std::env::temp_dir().join(&file_name);
-    std::fs::write(&dest, &bytes)
-        .map_err(|e| format!("No se pudo guardar el instalador en temporales: {e}"))?;
-
-    background_command(dest.to_string_lossy().as_ref())
-        .spawn()
-        .map_err(|e| format!("No se pudo iniciar el instalador: {e}"))?;
-
-    Ok(dest.to_string_lossy().to_string())
+        .map_err(|e| format!("No se pudo descargar o verificar la actualización: {e}"))?;
+    app.state::<crate::AppState>().active_runs.cancel_all();
+    update.install(bytes).map_err(|e| format!("No se pudo instalar la actualización: {e}"))?;
+    app.restart();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// El actualizador tiene que apuntar a las releases de ESTE repositorio por HTTPS: no a las del Editor, que comparten nombres de
+    /// etiqueta y la marca «Latest».
     #[test]
-    fn compara_versiones_desktop_y_v() {
-        assert!(is_newer_version("v0.3.1", "0.3.0"));
-        assert!(is_newer_version("desktop-v0.4.0", "0.3.0"));
-        assert!(!is_newer_version("v0.3.0", "0.3.0"));
-        assert!(!is_newer_version("v0.2.0", "0.3.0"));
+    fn el_actualizador_apunta_a_las_releases_de_pulso_desktop() {
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let up = &conf["plugins"]["updater"];
+        let endpoints: Vec<&str> = up["endpoints"].as_array().unwrap().iter().map(|e| e.as_str().unwrap()).collect();
+        assert_eq!(
+            endpoints,
+            ["https://github.com/santiago123-dex/Pulso-Desktop/releases/latest/download/latest.json"]
+        );
+        assert!(!up["pubkey"].as_str().unwrap().trim().is_empty(), "falta la clave pública");
+        assert_eq!(up["windows"]["installMode"], "passive");
     }
 
     #[test]
-    fn detecta_nombre_de_instalador_desktop() {
-        assert!(is_desktop_installer("Pulso.Desktop_0.3.1_x64-setup.exe"));
-        assert!(is_desktop_installer("Pulso Desktop_0.4.0_x64-setup.exe"));
-        assert!(!is_desktop_installer("Pulso.Editor_0.3.1_x64-setup.exe"));
+    fn las_notas_se_recortan_y_pueden_faltar() {
+        assert_eq!(clip_notes(None), "");
+        assert_eq!(clip_notes(Some("  hola \n")), "hola");
+        assert_eq!(clip_notes(Some(&"ñ".repeat(MAX_NOTES + 50))).chars().count(), MAX_NOTES);
     }
 }

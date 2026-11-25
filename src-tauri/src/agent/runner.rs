@@ -107,6 +107,18 @@ impl ActiveRuns {
         }
     }
 
+    /// Detiene todas las respuestas en marcha (al instalar una actualización, para no dejar procesos sueltos).
+    pub fn cancel_all(&self) {
+        let pids: Vec<u32> = self
+            .pids
+            .lock()
+            .map(|mut map| map.drain().map(|(_, pid)| pid).collect())
+            .unwrap_or_default();
+        for pid in pids {
+            kill_pid(pid);
+        }
+    }
+
     pub fn cancel(&self, run_id: &str) -> bool {
         let pid = self
             .pids

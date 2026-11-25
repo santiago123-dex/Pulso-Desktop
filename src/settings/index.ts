@@ -174,9 +174,6 @@ export interface DesktopUpdateInfo {
   version: string;
   current: string;
   notes: string;
-  releaseUrl: string;
-  downloadUrl: string;
-  assetName: string;
 }
 
 export async function checkDesktopUpdate(): Promise<DesktopUpdateInfo | null> {
@@ -184,10 +181,8 @@ export async function checkDesktopUpdate(): Promise<DesktopUpdateInfo | null> {
   return invoke<DesktopUpdateInfo | null>("check_desktop_update");
 }
 
-export async function installDesktopUpdate(info: DesktopUpdateInfo): Promise<void> {
+/** Descarga la versión nueva, comprueba su firma, la instala y reinicia. Si la firma no es válida, falla sin instalar nada. */
+export async function installDesktopUpdate(): Promise<void> {
   if (!isTauriRuntime()) return;
-  await invoke("install_desktop_update", {
-    downloadUrl: info.downloadUrl,
-    assetName: info.assetName,
-  });
+  await invoke("install_desktop_update");
 }

@@ -1,5 +1,17 @@
 # Changelog — Pulso Desktop
 
+## [0.3.1] - 2026-11-25
+
+### Seguridad
+- **Las actualizaciones se verifican con firma.** El actualizador anterior descargaba el instalador y lo ejecutaba sin comprobar nada más que la dirección. Ahora usa el actualizador de Tauri: el instalador tiene que venir firmado con la clave de Pulso Desktop o se rechaza antes de ejecutarlo.
+
+### Cambiado
+- Las actualizaciones se leen de las releases de **este** repositorio (`latest.json` de la release «Latest»), no de las del Editor.
+- Al instalar una actualización se detienen las respuestas de IA en marcha y la aplicación se reinicia sola.
+- Los instaladores los construye y firma la CI (`.github/workflows/release.yml`). Ver [Distribución](docs/DISTRIBUCION.md).
+
+> La 0.3.0 no puede actualizarse sola a esta versión: hay que instalar la 0.3.1 a mano una vez.
+
 ## [0.3.0] - 2026-11-24
 
 Primer lanzamiento instalable de **Pulso Desktop**, diseñado como aplicación de escritorio liviana enfocada en agentes de IA, proyectos locales, artefactos y servidores MCP, integrada con **Pulso Editor** y la CLI `pulso`.

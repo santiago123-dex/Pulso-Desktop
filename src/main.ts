@@ -479,8 +479,8 @@ function renderUpdateModal(locale: Locale): string {
           <div class="provider-card-sub">
             ${
               locale === "en"
-                ? `You have v${availableUpdate.current} installed and v${availableUpdate.version} is ready. Pulso Desktop will download the installer and update automatically.`
-                : `Tienes instalada la v${availableUpdate.current} y está disponible la v${availableUpdate.version}. Pulso Desktop descargará el instalador y se actualizará automáticamente.`
+                ? `You have v${availableUpdate.current} installed and v${availableUpdate.version} is ready. Pulso Desktop will download it, check its signature, install it and restart. Replies in progress will stop.`
+                : `Tienes instalada la v${availableUpdate.current} y está disponible la v${availableUpdate.version}. Pulso Desktop la descargará, comprobará su firma, la instalará y se reiniciará. Las respuestas en marcha se detendrán.`
             }
           </div>
           ${
@@ -1759,7 +1759,7 @@ function bindEvents(): void {
     updateStatusMsg = "";
     render();
     try {
-      await installDesktopUpdate(availableUpdate);
+      await installDesktopUpdate();
     } catch (err) {
       updateStatusMsg = typeof err === "string" ? err : String(err);
       installingUpdate = false;
