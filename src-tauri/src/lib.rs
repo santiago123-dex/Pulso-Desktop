@@ -248,8 +248,10 @@ fn open_in_pulso_editor(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn get_antigravity_quota() -> Vec<providers::QuotaGroup> {
-    providers::fetch_antigravity_quota().await
+async fn get_plan_usage(provider_id: String) -> Result<Vec<providers::QuotaGroup>, String> {
+    tauri::async_runtime::spawn_blocking(move || providers::usage::plan_usage(&provider_id))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -310,7 +312,7 @@ pub fn run() {
             list_workspace_files,
             inspect_project_skills,
             open_in_pulso_editor,
-            get_antigravity_quota,
+            get_plan_usage,
             check_desktop_update,
             install_desktop_update,
         ])

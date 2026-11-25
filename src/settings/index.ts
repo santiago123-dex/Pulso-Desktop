@@ -161,13 +161,10 @@ export interface McpServerItem {
   enabled: boolean;
 }
 
-export async function fetchAntigravityQuota(): Promise<QuotaGroup[]> {
+/** Falla con el motivo si la herramienta del proveedor no informa su uso. */
+export async function fetchPlanUsage(providerId: string): Promise<QuotaGroup[]> {
   if (!isTauriRuntime()) return [];
-  try {
-    return await invoke<QuotaGroup[]>("get_antigravity_quota");
-  } catch {
-    return [];
-  }
+  return invoke<QuotaGroup[]>("get_plan_usage", { providerId });
 }
 
 export interface DesktopUpdateInfo {

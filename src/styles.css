@@ -1567,6 +1567,22 @@ textarea {
   border-color: var(--border-strong);
 }
 
+.quota-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.quota-name {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.quota-reset {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
 .quota-group {
   display: flex;
   flex-direction: column;

@@ -8,6 +8,8 @@ use serde::Serialize;
 
 use crate::security::secrets::{secret_source, SecretSource};
 
+pub mod usage;
+
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderAuthMode {
@@ -87,7 +89,20 @@ pub fn resolve_cli_binary(name: &str) -> Option<String> {
 }
 
 fn capture_output(program: &str, args: &[&str], timeout_secs: u64) -> Option<(bool, String)> {
-    let mut child = background_command(program)
+    capture_output_in(program, args, timeout_secs, None)
+}
+
+fn capture_output_in(
+    program: &str,
+    args: &[&str],
+    timeout_secs: u64,
+    dir: Option<&std::path::Path>,
+) -> Option<(bool, String)> {
+    let mut command = background_command(program);
+    if let Some(dir) = dir {
+        command.current_dir(dir);
+    }
+    let mut child = command
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -415,24 +430,6 @@ pub fn parse_agy_usage_json(text: &str) -> Vec<QuotaGroup> {
         groups.push(QuotaGroup { name, buckets });
     }
     groups
-}
-
-pub async fn fetch_antigravity_quota() -> Vec<QuotaGroup> {
-    tauri::async_runtime::spawn_blocking(|| {
-        let Some(bin) = resolve_cli_binary("agy") else {
-            return Vec::new();
-        };
-        let Some((_, out)) = capture_output(
-            &bin,
-            &["-p", "/usage", "--output-format", "json", "--mode", "plan"],
-            18,
-        ) else {
-            return Vec::new();
-        };
-        parse_agy_usage_json(&out)
-    })
-    .await
-    .unwrap_or_default()
 }
 
 pub async fn detect_all_providers() -> Vec<ProviderInfo> {

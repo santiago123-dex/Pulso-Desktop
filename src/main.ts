@@ -1,4 +1,5 @@
 import "./styles.css";
+import { version as appVersion } from "../package.json";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { buildSandboxedDocument, type Artifact } from "./artifacts";
 import {
@@ -27,15 +28,15 @@ import {
   deleteProviderApiKey,
   describeProviderConnection,
   fallbackProviders,
-  fetchAntigravityQuota,
+  fetchPlanUsage,
   fetchDetectedProviders,
   installDesktopUpdate,
   saveProviderApiKey,
   type DesktopUpdateInfo,
   type McpServerItem,
   type ProviderStatus,
-  type QuotaGroup,
 } from "./settings";
+import { PERIODIC_MS, STALE_MS, createUsageTracker, renderUsageBody } from "./settings/usage";
 import {
   getWorkspaceStatus,
   inspectProjectSkills,
@@ -100,8 +101,7 @@ let checkingUpdate = false;
 let installingUpdate = false;
 let updateStatusMsg = "";
 let refreshingProviders = false;
-let loadingQuota = false;
-let quotaGroups: QuotaGroup[] = [];
+const usageTracker = createUsageTracker(fetchPlanUsage, () => syncUsageCard());
 let skillsReport: ProjectSkillsReport = { trusted: false, entries: [] };
 let mcpServers: McpServerItem[] = [];
 let automations: SavedAutomation[] = [
@@ -296,6 +296,30 @@ function updateStreamingMessageDom(msg: ChatMessage): void {
   }
 }
 
+/** Cuentas con sesión iniciada: son las que tienen un plan con límites. */
+function usageAccounts(): ProviderStatus[] {
+  return providers.filter((p) => p.accountConnected && !p.local);
+}
+
+function refreshPlanUsage(minAgeMs: number): void {
+  void usageTracker.refresh(
+    usageAccounts().map((p) => p.id),
+    minAgeMs,
+  );
+}
+
+/** Repinta solo la tarjeta: un `render()` completo borraría lo que se esté escribiendo. */
+function syncUsageCard(): void {
+  const body = document.getElementById("plan-usage-body");
+  if (body) body.innerHTML = renderUsageBody(usageAccounts(), usageTracker, getLocale());
+}
+
+function openSettings(): void {
+  settingsOpen = true;
+  render();
+  refreshPlanUsage(STALE_MS);
+}
+
 function renderSettingsModal(locale: Locale): string {
   if (!settingsOpen) return "";
   return `
@@ -376,52 +400,22 @@ function renderSettingsModal(locale: Locale): string {
             .join("")}
           <div class="provider-card">
             <div class="provider-card-head">
-              <div class="provider-card-title">
-                <span>${locale === "en" ? "Antigravity Quota" : "Cuota de Antigravity"}</span>
+              <div>
+                <div class="provider-card-title">
+                  <span>${locale === "en" ? "Plan usage" : "Uso de los planes"}</span>
+                </div>
+                <div class="provider-card-sub">${
+                  locale === "en" ? "Updates on its own." : "Se actualiza solo."
+                }</div>
               </div>
-              <button id="refresh-quota-btn" type="button" class="pill-btn">
+              <button id="refresh-usage-btn" type="button" class="pill-btn">
                 ${icons.refresh}
-                <span>${
-                  loadingQuota
-                    ? locale === "en"
-                      ? "Loading..."
-                      : "Consultando..."
-                    : locale === "en"
-                      ? "Check quota"
-                      : "Consultar cuota"
-                }</span>
+                <span>${locale === "en" ? "Update now" : "Actualizar ahora"}</span>
               </button>
             </div>
-            ${
-              quotaGroups.length === 0
-                ? `<div class="provider-card-sub">${
-                    locale === "en"
-                      ? "Click 'Check quota' to view remaining usage buckets."
-                      : "Pulsa 'Consultar cuota' para ver tu consumo disponible."
-                  }</div>`
-                : quotaGroups
-                    .map(
-                      (g) => `
-                  <div class="quota-group">
-                    <div style="font-size:12px;font-weight:600;">${escapeHtml(g.name)}</div>
-                    ${g.buckets
-                      .map(
-                        (b) => `
-                      <div class="quota-row">
-                        <div class="quota-row-top">
-                          <span>${escapeHtml(b.name || b.window)}</span>
-                          <span>${b.remainingPercent}%</span>
-                        </div>
-                        <div class="quota-bar">
-                          <div class="quota-fill" style="width:${b.remainingPercent}%;"></div>
-                        </div>
-                      </div>`
-                      )
-                      .join("")}
-                  </div>`
-                    )
-                    .join("")
-            }
+            <div id="plan-usage-body" class="quota-list">
+              ${renderUsageBody(usageAccounts(), usageTracker, locale)}
+            </div>
           </div>
           <div class="provider-card">
             <div class="provider-card-head">
@@ -437,8 +431,8 @@ function renderSettingsModal(locale: Locale): string {
                           ? `Version v${availableUpdate.version} available`
                           : `Versión v${availableUpdate.version} disponible`
                         : locale === "en"
-                          ? "Installed version: v0.3.0"
-                          : "Versión instalada: v0.3.0")
+                          ? `Installed version: v${appVersion}`
+                          : `Versión instalada: v${appVersion}`)
                   )}
                 </div>
               </div>
@@ -1319,10 +1313,9 @@ function applySuggestion(item: { value: string }): void {
       return;
     }
     if (item.value === "/ajustes") {
-      settingsOpen = true;
       input.value = "";
       draftText = "";
-      render();
+      openSettings();
       return;
     }
   } else if (suggestKind === "file") {
@@ -1347,6 +1340,7 @@ async function refreshProviders(autoSelectIfUnset: boolean): Promise<void> {
   const detected = await fetchDetectedProviders();
   providers = detected;
   refreshingProviders = false;
+  refreshPlanUsage(STALE_MS);
 
   const currentProv = providers.find((p) => p.id === providerId);
   if (autoSelectIfUnset && (!currentProv || !currentProv.connected)) {
@@ -1464,6 +1458,7 @@ async function submitMessage(): Promise<void> {
 
   const runId = crypto.randomUUID();
   activeRunId = runId;
+  const runProviderId = providerId;
   render();
 
   const scroller = document.getElementById("chat-scroll");
@@ -1554,6 +1549,11 @@ async function submitMessage(): Promise<void> {
     }
     activeRunId = null;
     render();
+  } finally {
+    // Terminada, fallida o cancelada: la respuesta ya consumió parte del plan.
+    if (usageAccounts().some((p) => p.id === runProviderId)) {
+      void usageTracker.invalidate(runProviderId);
+    }
   }
 }
 
@@ -1672,13 +1672,11 @@ function bindEvents(): void {
   document.getElementById("menu-open-settings-btn")?.addEventListener("click", (ev) => {
     ev.stopPropagation();
     providerMenuOpen = false;
-    settingsOpen = true;
-    render();
+    openSettings();
   });
 
   document.getElementById("open-settings-btn")?.addEventListener("click", () => {
-    settingsOpen = true;
-    render();
+    openSettings();
   });
 
   document.getElementById("close-settings-btn")?.addEventListener("click", () => {
@@ -1697,12 +1695,8 @@ function bindEvents(): void {
     void refreshProviders(false);
   });
 
-  document.getElementById("refresh-quota-btn")?.addEventListener("click", async () => {
-    loadingQuota = true;
-    render();
-    quotaGroups = await fetchAntigravityQuota();
-    loadingQuota = false;
-    render();
+  document.getElementById("refresh-usage-btn")?.addEventListener("click", () => {
+    refreshPlanUsage(0);
   });
 
   document.getElementById("check-update-btn")?.addEventListener("click", async () => {
@@ -1898,6 +1892,7 @@ function bindEvents(): void {
         skillsReport = await inspectProjectSkills();
       } else if (act === "open-settings") {
         settingsOpen = true;
+        refreshPlanUsage(STALE_MS);
       } else if (act === "toggle-sidebar") {
         sidebarOpen = !sidebarOpen;
       } else if (act === "toggle-artifacts") {
@@ -2293,5 +2288,18 @@ document.addEventListener("keydown", (ev) => {
     }
   }
 });
+
+/** Con la ventana a la vista el uso se consulta solo; oculta o minimizada, no. */
+function refreshUsageIfVisible(minAgeMs: number): void {
+  if (document.visibilityState === "visible") refreshPlanUsage(minAgeMs);
+}
+
+window.addEventListener("focus", () => refreshUsageIfVisible(STALE_MS));
+document.addEventListener("visibilitychange", () => refreshUsageIfVisible(STALE_MS));
+// Cada minuto repinta la antigüedad y consulta lo que ya tenga más de cinco minutos.
+window.setInterval(() => {
+  syncUsageCard();
+  refreshUsageIfVisible(PERIODIC_MS);
+}, 60_000);
 
 void bootstrap();
