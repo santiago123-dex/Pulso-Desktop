@@ -1,0 +1,67 @@
+# Al subir una etiqueta vX.Y.Z genera el instalador de Windows, lo FIRMA y lo deja en un borrador de release de ESTE repositorio
+# (público), con el latest.json que leen las instalaciones para actualizarse. La versión de la etiqueta debe coincidir con la de
+# src-tauri/tauri.conf.json. El borrador hay que publicarlo a mano. Ver docs/DISTRIBUCION.md.
+name: Publicación
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Instalador (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Se comprueba antes de compilar (tarda varios minutos): sin la clave pública y la privada no se puede publicar nada
+      # que las instalaciones acepten.
+      - name: Comprobar la etiqueta y las claves
+        shell: pwsh
+        env:
+          HAY_CLAVE_PRIVADA: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        run: |
+          $conf = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          if ("v$($conf.version)" -ne $env:GITHUB_REF_NAME) { throw "La etiqueta $env:GITHUB_REF_NAME no coincide con la versión $($conf.version) de tauri.conf.json." }
+          if ($conf.plugins.updater.pubkey -like "PENDIENTE*") { throw "Falta la clave pública en src-tauri/tauri.conf.json (ver docs/DISTRIBUCION.md)." }
+          if ($env:HAY_CLAVE_PRIVADA -ne "true") { throw "Falta el secreto TAURI_SIGNING_PRIVATE_KEY en este repositorio (ver docs/DISTRIBUCION.md)." }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Pruebas
+        run: |
+          npm test
+          npm run test:rust
+
+      - name: Compilar, firmar y adjuntar a la release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Firma de los paquetes de actualización. La clave privada solo vive en los secretos del repositorio.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: v__VERSION__
+          releaseName: Pulso Desktop v__VERSION__
+          releaseBody: Instalador sin firma de Windows. SmartScreen mostrará una advertencia.
+          # Borrador: hay que publicarlo a mano. No se marca como preliminar porque las actualizaciones leen latest.json de la
+          # última release publicada («Latest»), que excluye las preliminares.
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true
+          args: --bundles nsis --config src-tauri/tauri.updater.conf.json

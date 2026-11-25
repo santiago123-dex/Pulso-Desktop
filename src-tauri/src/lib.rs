@@ -253,19 +253,15 @@ async fn get_antigravity_quota() -> Vec<providers::QuotaGroup> {
 }
 
 #[tauri::command]
-async fn check_desktop_update() -> Result<Option<updates::DesktopUpdateInfo>, String> {
-    updates::check_for_desktop_update().await
+async fn check_desktop_update(
+    app: tauri::AppHandle,
+) -> Result<Option<updates::DesktopUpdateInfo>, String> {
+    updates::check(&app).await
 }
 
 #[tauri::command]
-async fn install_desktop_update(
-    app: tauri::AppHandle,
-    download_url: String,
-    asset_name: String,
-) -> Result<(), String> {
-    updates::download_and_launch_installer(download_url, asset_name).await?;
-    app.exit(0);
-    Ok(())
+async fn install_desktop_update(app: tauri::AppHandle) -> Result<(), String> {
+    updates::install(&app).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -279,6 +275,7 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let app_data_dir = app
                 .path()

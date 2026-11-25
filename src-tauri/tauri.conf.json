@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Pulso Desktop",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "identifier": "dev.pulso.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -24,6 +24,13 @@
     ],
     "security": {
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-src blob: data:;"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE4MDFDNjk4RkE5MDgzREUKUldUZWc1RDZtTVlCcUo3eXNJYVgvM3NWVkNyTE9YOFpRZnhmRS8wdWt2NFVpQ0lSbmt1a0ZSVk0K",
+      "endpoints": ["https://github.com/santiago123-dex/Pulso-Desktop/releases/latest/download/latest.json"],
+      "windows": { "installMode": "passive" }
     }
   },
   "bundle": {
